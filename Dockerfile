@@ -1,44 +1,40 @@
-# Use Windows Server Core as the base image
-FROM mcr.microsoft.com/windows/servercore:ltsc2022
+# Use Ubuntu as base image
+FROM ubuntu:20.04
 
 # Set environment variable for non-interactive operations
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install QEMU (Windows version) for virtualization (Windows software virtualization)
-RUN powershell -Command \
-    Invoke-WebRequest -Uri https://qemu.weilnetz.de/w64/ -OutFile "qemu.zip"; \
-    Expand-Archive -Path "qemu.zip" -DestinationPath "C:\qemu"; \
-    Remove-Item -Path "qemu.zip"
+# Update packages and install required dependencies
+RUN apt-get update && apt-get install -y \
+    qemu \
+    wget \
+    unzip \
+    x11vnc \
+    novnc \
+    supervisor \
+    xorg \
+    openbox \
+    && rm -rf /var/lib/apt/lists/*
 
-# Install NoVNC and dependencies for remote desktop access
-RUN powershell -Command \
-    Invoke-WebRequest -Uri https://github.com/novnc/noVNC/archive/refs/tags/v1.2.0.zip -OutFile "novnc.zip"; \
-    Expand-Archive -Path "novnc.zip" -DestinationPath "C:\novnc"; \
-    Remove-Item -Path "novnc.zip"
+# Create directories for storing the Windows 11 ISO and VM data
+RUN mkdir -p /opt/windows /opt/qemu /opt/novnc
 
-# Install additional required utilities (like Xvfb, and other utilities for remote access)
-RUN powershell -Command \
-    Invoke-WebRequest -Uri https://chocolatey.org/install.ps1 -OutFile "install-choco.ps1"; \
-    powershell -ExecutionPolicy Bypass -File "install-choco.ps1"; \
-    Remove-Item -Path "install-choco.ps1" -Force; \
-    choco install -y x11vnc
+# Download the Windows 11 ISO (You can replace with your own ISO if necessary)
+RUN wget -q -O /opt/windows/windows11.iso "https://example.com/windows11.iso"
 
-# Install wget (to download Windows ISO) and unzip
-RUN powershell -Command \
-    choco install -y wget unzip
+# Download NoVNC and required web server components
+RUN wget -q -O /opt/novnc/novnc.zip https://github.com/novnc/noVNC/archive/refs/tags/v1.2.0.zip \
+    && unzip /opt/novnc/novnc.zip -d /opt/novnc \
+    && rm /opt/novnc/novnc.zip
 
-# Set working directory for files
-WORKDIR /app
+# Copy custom entry point script for starting Windows 11 VM
+COPY start-win11.sh /opt/start-win11.sh
+RUN chmod +x /opt/start-win11.sh
 
-# Download Windows ISO (replace with correct Windows ISO URL or mount your own)
-RUN wget -q -O "C:\\app\\windows.iso" "https://example.com/windows.iso"
-
-# Copy a custom script for starting the Windows VM
-COPY start-win.sh /app/start-win.sh
-RUN powershell -Command Set-ExecutionPolicy RemoteSigned -Scope CurrentUser
-
-# Expose ports for NoVNC (VNC and WebSocket)
+# Expose VNC and WebSocket ports for NoVNC
 EXPOSE 5900 6080
 
-# Entry point to run the Windows VM with NoVNC
-CMD ["powershell", "C:\\app\\start-win.sh"]
+# Set supervisor to manage services
+COPY supervisord.conf /etc/supervisor/supervisord.conf
+
+CMD ["/usr/bin/supervisord", "-c", "/etc/supervisor/supervisord.conf"]
